@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from colorscheme import make_palette
+from highlighter import Highlighter
 
 
 class CodeEditor(QPlainTextEdit):
@@ -138,6 +139,7 @@ class MainWindow(QMainWindow):
         about_menu = self.menuBar().addMenu("About")
 
         self.code_editor = CodeEditor(self)
+        self.highlighter = Highlighter(self.code_editor.document())
         self.setCentralWidget(self.code_editor)
 
     def open_file(self) -> None:
