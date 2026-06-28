@@ -10,6 +10,7 @@ from PySide6.QtGui import (
     QPainter,
     QPalette,
     QFont,
+    QFontMetrics,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -31,7 +32,11 @@ class CodeEditor(QPlainTextEdit):
         self.cursorPositionChanged.connect(self.highlight_current_line)
         self.setPalette(make_palette())
         self.text_style = QFont("DejaVu Sans Mono", 16)
+        self.text_style.setFixedPitch(True)
         self.setFont(self.text_style)
+        self.setTabStopDistance(
+            QFontMetrics(self.text_style).horizontalAdvance(" ") * 4
+        )
 
         self.update_line_number_area_width(0)
         self.highlight_current_line()
