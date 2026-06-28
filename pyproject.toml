@@ -1,0 +1,18 @@
+[project]
+name = "editboi"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pyside6>=6.11.1",
+]
+
+[dependency-groups]
+dev = [
+    "pylsp-mypy>=0.7.3",
+    "python-lsp-black>=2.0.0",
+    "python-lsp-server[all]>=1.14.0",
+]
+[tool.mypy]
+strict=true
