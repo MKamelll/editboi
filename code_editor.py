@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
 
 from colorscheme import make_palette
 
+# refrence: https://felgo.com/doc/qt5/qtwidgets-widgets-codeeditor-example/
+
 
 class CodeEditor(QPlainTextEdit):
     def __init__(self, parent: QWidget | None = None) -> None:
