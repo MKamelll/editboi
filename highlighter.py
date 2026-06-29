@@ -5,11 +5,10 @@ from PySide6.QtGui import (
     QColor,
     QFont,
 )
-from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import QRegularExpression, QRegularExpressionMatchIterator
+from PySide6.QtCore import QRegularExpression
 from dataclasses import dataclass
-from keyword import kwlist
-import re
+from keyword import kwlist, softkwlist
+from itertools import chain
 
 
 @dataclass
@@ -29,10 +28,17 @@ class SyntaxTheme:
     klass = QColor("#98f5ff")
 
 
+# reference: https://felgo.com/doc/qt5/qtwidgets-richtext-syntaxhighlighter-example/
+# refrence: https://wiki.python.org/python/PyQt(2f)Python(20)syntax(20)highlighting.html
+
+
 class HighlightingRule:
-    def __init__(self, pattern: QRegularExpression, form: QTextCharFormat):
+    def __init__(
+        self, pattern: QRegularExpression, form: QTextCharFormat, group: int = 0
+    ):
         self.pattern = pattern
         self.form = form
+        self.group = group
 
 
 class Highlighter(QSyntaxHighlighter):
@@ -44,22 +50,46 @@ class Highlighter(QSyntaxHighlighter):
         self.quotation_format = QTextCharFormat()
         self.function_foramt = QTextCharFormat()
         self.multiline_string_format = QTextCharFormat()
+        self.builtin_format = QTextCharFormat()
+        self.builtin = {
+            "int",
+            "str",
+            "float",
+            "bool",
+            "list",
+            "dict",
+            "tuple",
+            "set",
+            "bytes",
+            "None",
+            "True",
+            "False",
+            "super",
+        }
         self.theme = SyntaxTheme()
 
         self.keyword_format.setForeground(self.theme.keyword)
         self.keyword_format.setFontWeight(QFont.Weight.Bold)
-        keyword_patterns = [rf"\b{k}\b" for k in kwlist]
+        keyword_patterns = [
+            rf"\b{k}\b" for k in chain(kwlist, softkwlist) if k not in self.builtin
+        ]
 
         self.highlighting_rules = [
             HighlightingRule(QRegularExpression(p), self.keyword_format)
             for p in keyword_patterns
         ]
 
+        self.builtin_format.setForeground(self.theme.builtin)
+        self.highlighting_rules.extend(
+            HighlightingRule(QRegularExpression(t), self.builtin_format)
+            for t in self.builtin
+        )
+
         self.class_format.setFontWeight(QFont.Weight.Bold)
         self.class_format.setForeground(self.theme.klass)
         self.highlighting_rules.append(
             HighlightingRule(
-                QRegularExpression(r"\bclass\s+(\w+)\b"), self.class_format
+                QRegularExpression(r"\bclass\s+(\w+)\b"), self.class_format, 1
             )
         )
 
@@ -73,8 +103,7 @@ class Highlighter(QSyntaxHighlighter):
         self.function_foramt.setForeground(self.theme.function)
         self.highlighting_rules.append(
             HighlightingRule(
-                QRegularExpression(r"\bdef\s+(\w+)"),
-                self.function_foramt,
+                QRegularExpression(r"\bdef\s+(\w+)"), self.function_foramt, 1
             )
         )
 
@@ -83,7 +112,8 @@ class Highlighter(QSyntaxHighlighter):
             HighlightingRule(QRegularExpression("#[^\n]*"), self.comment_format)
         )
 
-        self.multiline_expression = QRegularExpression(r'"""|\'\'\'')
+        self.triple_double = QRegularExpression('"""')
+        self.triple_single = QRegularExpression("'''")
         self.multiline_string_format.setForeground(self.theme.string)
 
     def highlightBlock(self, text: str) -> None:
@@ -91,11 +121,38 @@ class Highlighter(QSyntaxHighlighter):
             match_iter = rule.pattern.globalMatch(text)
             while match_iter.hasNext():
                 _match = match_iter.next()
-                if rule.form in [self.class_format, self.function_foramt]:
-                    self.setFormat(
-                        _match.capturedStart(1), _match.capturedLength(1), rule.form
-                    )
-                else:
-                    self.setFormat(
-                        _match.capturedStart(), _match.capturedLength(), rule.form
-                    )
+                self.setFormat(
+                    _match.capturedStart(rule.group),
+                    _match.capturedLength(rule.group),
+                    rule.form,
+                )
+
+        self.setCurrentBlockState(0)
+
+        if not self.match_multiline(text, self.triple_double, 1):
+            self.match_multiline(text, self.triple_single, 2)
+
+    def match_multiline(self, text: str, delim: QRegularExpression, in_state: int):
+        if self.previousBlockState() == in_state:
+            start = 0
+            add = 0
+        else:
+            _match = delim.match(text)
+            start = _match.capturedStart()
+            add = _match.capturedLength()
+
+        while start >= 0:
+            _match = delim.match(text, start + add)
+            end = _match.capturedStart()
+            if end >= add:
+                length = end - start + add + _match.capturedLength()
+                self.setCurrentBlockState(0)
+            else:
+                self.setCurrentBlockState(in_state)
+                length = len(text) - start + add
+
+            self.setFormat(start, length, self.multiline_string_format)
+            _match = delim.match(text, start + length)
+            start = _match.capturedStart()
+
+        return self.currentBlockState() == in_state
