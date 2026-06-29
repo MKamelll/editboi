@@ -1,4 +1,4 @@
-from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtCore import QRect, QSize, Qt, QAbstractItemModel, QStringListModel
 from PySide6.QtGui import (
     QPaintEvent,
     QResizeEvent,
@@ -7,14 +7,22 @@ from PySide6.QtGui import (
     QPalette,
     QFont,
     QFontMetrics,
+    QKeyEvent,
+    QTextCursor,
 )
 from PySide6.QtWidgets import (
     QPlainTextEdit,
     QWidget,
     QTextEdit,
+    QCompleter,
+    QAbstractItemView,
 )
 
 from colorscheme import make_palette
+from keyword import kwlist, softkwlist
+import builtins
+from itertools import chain
+import re
 
 # refrence: https://felgo.com/doc/qt5/qtwidgets-widgets-codeeditor-example/
 
@@ -36,6 +44,109 @@ class CodeEditor(QPlainTextEdit):
 
         self.update_line_number_area_width(0)
         self.highlight_current_line()
+
+        self.words_list = list(
+            set(
+                k
+                for k in chain(
+                    kwlist,
+                    softkwlist,
+                    dir(builtins),
+                    dir(type),
+                    dir(object),
+                    ["self", "cls"],
+                )
+            )
+        )
+        self.completer = QCompleter(self.words_list)
+        self.completer.setWidget(self)
+        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.minimum_prefix_length = 2
+        self.document().contentsChanged.connect(self.update_completer)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if popup := self.completer.popup():
+            if popup.isVisible():
+                if event.key() == Qt.Key.Key_Up:
+                    row = popup.currentIndex().row()
+                    prev_row = (row - 1) % self.completer.completionModel().rowCount()
+                    popup.setCurrentIndex(
+                        self.completer.completionModel().index(prev_row, 0)
+                    )
+                    return
+                if event.key() in [Qt.Key.Key_Enter, Qt.Key.Key_Return]:
+                    index = popup.currentIndex()
+                    completion = self.completer.completionModel().data(index)
+                    self.insert_completion(completion)
+                    popup.hide()
+                    return
+                if event.key() in [Qt.Key.Key_Tab, Qt.Key.Key_Down]:
+                    row = popup.currentIndex().row()
+                    next_row = (row + 1) % self.completer.completionModel().rowCount()
+                    popup.setCurrentIndex(
+                        self.completer.completionModel().index(next_row, 0)
+                    )
+                    return
+                if event.key() == Qt.Key.Key_Escape:
+                    popup.hide()
+                    return
+
+        super().keyPressEvent(event)
+
+        prefix = self.word_under_cursor()
+        if len(prefix) < self.minimum_prefix_length:
+            if popup := self.completer.popup():
+                popup.hide()
+            return
+
+        if prefix != self.completer.completionPrefix():
+            self.completer.setCompletionPrefix(prefix)
+            if popup := self.completer.popup():
+                popup.setCurrentIndex(self.completer.completionModel().index(0, 0))
+
+        rect = self.cursorRect()
+        if popup := self.completer.popup():
+            rect.setWidth(popup.sizeHintForColumn(0) + self.popup_best_size(popup))
+
+        self.completer.complete(rect)
+
+    def popup_best_size(self, popup: QAbstractItemView, extra_padding: int = 0) -> int:
+        padding = popup.width() - popup.viewport().width()
+        frame_width = 2 * popup.frameWidth()
+        longest_string = ""
+        model = self.completer.completionModel()
+        for row in range(model.rowCount()):
+            text = model.data(model.index(row, 0), Qt.ItemDataRole.DisplayRole)
+            if text and len(text) > len(longest_string):
+                longest_string = text
+
+        metrics = popup.fontMetrics()
+        text_width = metrics.horizontalAdvance(longest_string)
+        return padding + frame_width + text_width + extra_padding
+
+    def get_document_words(self) -> list[str]:
+        text = self.toPlainText()
+        words = re.findall(r"\b\w+\b", text)
+        current_word = self.word_under_cursor()
+        return list(k for k in set(words) if k != current_word)
+
+    def update_completer(self) -> None:
+        doc_words = self.get_document_words()
+        all_words = sorted(set(self.words_list + doc_words))
+        model = QStringListModel(all_words)
+        self.completer.setModel(model)
+
+    def insert_completion(self, completion: str):
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        cursor.insertText(completion)
+        self.setTextCursor(cursor)
+
+    def word_under_cursor(self) -> str:
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        return cursor.selectedText()
 
     def line_number_area_paint_event(self, event: QPaintEvent) -> None:
         painter = QPainter(self.line_number_area)
