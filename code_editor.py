@@ -1,4 +1,4 @@
-from PySide6.QtCore import QRect, QSize, Qt, QAbstractItemModel, QStringListModel
+from PySide6.QtCore import QRect, QSize, Qt, QStringListModel
 from PySide6.QtGui import (
     QPaintEvent,
     QResizeEvent,
