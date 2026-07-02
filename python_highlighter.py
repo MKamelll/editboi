@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from keyword import kwlist, softkwlist
 from itertools import chain
 from tree_sitter import Language, Parser, Tree, Query, QueryCursor
-import tree_sitter_python as tspython
-import tree_sitter_language_pack as tslp
 import logging
 
 
@@ -35,8 +33,8 @@ class SyntaxTheme:
 # refrence: https://wiki.python.org/python/PyQt(2f)Python(20)syntax(20)highlighting.html
 
 
-class Highlighter(QSyntaxHighlighter):
-    def __init__(self, parent: QTextDocument, ext: str = ".py") -> None:
+class PythonHighlighter(QSyntaxHighlighter):
+    def __init__(self, lang: Language, scm: str, parent: QTextDocument) -> None:
         super().__init__(parent)
         self.keyword_format = QTextCharFormat()
         self.class_format = QTextCharFormat()
@@ -51,21 +49,8 @@ class Highlighter(QSyntaxHighlighter):
         self.theme = SyntaxTheme()
         self.tree: Tree | None = None
         self.editor = parent
-        ext_map = {".py": "python"}
-        lang_id = ext_map.get(ext)
-        if not lang_id:
-            logging.warning(f"couldn't find a matching language for extension {ext}")
-            lang_id = "text"
-
-        self.lang = tslp.get_language(lang_id)
-        self.parser = Parser(self.lang)
-        scm_text = tslp.get_highlights_query(lang_id)
-        if not scm_text:
-            logging.warning(
-                f"couldn't get the treesitter highlights query for {lang_id}"
-            )
-            scm_text = ""
-        self.query = Query(self.lang, scm_text)
+        self.parser = Parser(language=lang)
+        self.query = Query(lang, scm)
         self.cursor = QueryCursor(self.query)
 
         self.keyword_format.setForeground(self.theme.keyword)

@@ -23,13 +23,16 @@ from keyword import kwlist, softkwlist
 import builtins
 from itertools import chain
 import re
-from highlighter import Highlighter
+from python_highlighter import PythonHighlighter
+import tree_sitter_language_pack as tslp
 
 # refrence: https://felgo.com/doc/qt5/qtwidgets-widgets-codeeditor-example/
 
+type Highlighter = PythonHighlighter
+
 
 class CodeEditor(QPlainTextEdit):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, ext: str, parent: QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.line_number_area = LineNumberArea(self, self)
         self.blockCountChanged.connect(self.update_line_number_area_width)
@@ -42,8 +45,19 @@ class CodeEditor(QPlainTextEdit):
         self.setTabStopDistance(
             QFontMetrics(self.text_style).horizontalAdvance(" ") * 4
         )
+        self.highlighter: Highlighter | None = None
+        highlighters = {"python": PythonHighlighter}
 
-        self.highlighter = Highlighter(self.document())
+        ext_map = {".py": "python"}
+        self.lang_id = ext_map.get(ext)
+
+        if self.lang_id:
+            lang = tslp.get_language(self.lang_id)
+            scm = tslp.get_highlights_query(self.lang_id)
+            highlighter = highlighters.get(self.lang_id)
+            if scm and highlighter:
+                self.highlighter = highlighter(lang, scm, self.document())
+
         self.update_line_number_area_width(0)
         self.highlight_current_line()
 
@@ -71,7 +85,8 @@ class CodeEditor(QPlainTextEdit):
         with open(path, "r") as f:
             content = f.read()
             self.setPlainText(content)
-            self.highlighter.rehighlight()
+            if self.highlighter:
+                self.highlighter.rehighlight()
 
     def save_file(self, path: str) -> None:
         with open(path, "w") as f:

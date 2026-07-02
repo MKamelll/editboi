@@ -18,7 +18,7 @@ class MainWindow(QMainWindow):
         help_menu = self.menuBar().addMenu("Help")
         about_menu = self.menuBar().addMenu("About")
 
-        self.code_editor = CodeEditor(self)
+        self.code_editor = CodeEditor(".py", self)
         self.setCentralWidget(self.code_editor)
 
     def open_file(self) -> None:
