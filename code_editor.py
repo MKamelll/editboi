@@ -23,6 +23,7 @@ from keyword import kwlist, softkwlist
 import builtins
 from itertools import chain
 import re
+from highlighter import Highlighter
 
 # refrence: https://felgo.com/doc/qt5/qtwidgets-widgets-codeeditor-example/
 
@@ -42,6 +43,7 @@ class CodeEditor(QPlainTextEdit):
             QFontMetrics(self.text_style).horizontalAdvance(" ") * 4
         )
 
+        self.highlighter = Highlighter(self.document())
         self.update_line_number_area_width(0)
         self.highlight_current_line()
 
@@ -64,6 +66,16 @@ class CodeEditor(QPlainTextEdit):
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.minimum_prefix_length = 2
         self.document().contentsChanged.connect(self.update_completer)
+
+    def load_file(self, path: str) -> None:
+        with open(path, "r") as f:
+            content = f.read()
+            self.setPlainText(content)
+            self.highlighter.rehighlight()
+
+    def save_file(self, path: str) -> None:
+        with open(path, "w") as f:
+            f.write(self.toPlainText())
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if popup := self.completer.popup():

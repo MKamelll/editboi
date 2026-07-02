@@ -1,5 +1,4 @@
 from code_editor import CodeEditor
-from highlighter import Highlighter
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox
 
 
@@ -20,7 +19,6 @@ class MainWindow(QMainWindow):
         about_menu = self.menuBar().addMenu("About")
 
         self.code_editor = CodeEditor(self)
-        self.highlighter = Highlighter(self.code_editor.document())
         self.setCentralWidget(self.code_editor)
 
     def open_file(self) -> None:
@@ -29,16 +27,12 @@ class MainWindow(QMainWindow):
         )
 
         if path:
-            with open(path, "r") as f:
-                content = f.read()
-                self.code_editor.setPlainText(content)
-
+            self.code_editor.load_file(path)
             self.current_file = path
 
     def save_file(self) -> None:
         if self.current_file:
-            with open(self.current_file, "w") as f:
-                f.write(self.code_editor.toPlainText())
+            self.code_editor.save_file(self.current_file)
         else:
             self.save_as()
 
@@ -47,8 +41,7 @@ class MainWindow(QMainWindow):
             self, "Save File", "", "Python Files (*.py);;All Files (*)"
         )
         if path:
-            with open(path, "w") as f:
-                f.write(self.code_editor.toPlainText())
+            self.code_editor.save_file(path)
             self.current_file = path
 
     def quit(self) -> None:

@@ -9,6 +9,10 @@ from PySide6.QtCore import QRegularExpression
 from dataclasses import dataclass
 from keyword import kwlist, softkwlist
 from itertools import chain
+from tree_sitter import Language, Parser, Tree, Query, QueryCursor
+import tree_sitter_python as tspython
+import tree_sitter_language_pack as tslp
+import logging
 
 
 @dataclass
@@ -17,142 +21,140 @@ class SyntaxTheme:
     string = QColor("#deb887")
     comment = QColor("#808080")
     function = QColor("#daa520")
-    kind = QColor("#98f5ff")
     variable = QColor("#4eee94")
     constant = QColor("#a2cd5a")
-    builtin = QColor("#f08080")
+    kind = QColor("#f08080")
     preprocessor = QColor("#ffd700")
-    doc_string = QColor("#ffe4b5")
     error = QColor("#ff0000")
     warning = QColor("#ffff00")
     klass = QColor("#98f5ff")
+    base = QColor("#cccccc")
 
 
 # reference: https://felgo.com/doc/qt5/qtwidgets-richtext-syntaxhighlighter-example/
 # refrence: https://wiki.python.org/python/PyQt(2f)Python(20)syntax(20)highlighting.html
 
 
-class HighlightingRule:
-    def __init__(
-        self, pattern: QRegularExpression, form: QTextCharFormat, group: int = 0
-    ):
-        self.pattern = pattern
-        self.form = form
-        self.group = group
-
-
 class Highlighter(QSyntaxHighlighter):
-    def __init__(self, parent: QTextDocument) -> None:
+    def __init__(self, parent: QTextDocument, ext: str = ".py") -> None:
         super().__init__(parent)
         self.keyword_format = QTextCharFormat()
         self.class_format = QTextCharFormat()
         self.comment_format = QTextCharFormat()
-        self.quotation_format = QTextCharFormat()
         self.function_foramt = QTextCharFormat()
-        self.multiline_string_format = QTextCharFormat()
-        self.builtin_format = QTextCharFormat()
-        self.builtin = {
-            "int",
-            "str",
-            "float",
-            "bool",
-            "list",
-            "dict",
-            "tuple",
-            "set",
-            "bytes",
-            "None",
-            "True",
-            "False",
-            "super",
-        }
+        self.string_format = QTextCharFormat()
+        self.variable_format = QTextCharFormat()
+        self.error_format = QTextCharFormat()
+        self.constant_format = QTextCharFormat()
+        self.kind_format = QTextCharFormat()
+        self.base_format = QTextCharFormat()
         self.theme = SyntaxTheme()
+        self.tree: Tree | None = None
+        self.editor = parent
+        ext_map = {".py": "python"}
+        lang_id = ext_map.get(ext)
+        if not lang_id:
+            logging.warning(f"couldn't find a matching language for extension {ext}")
+            lang_id = "text"
+
+        self.lang = tslp.get_language(lang_id)
+        self.parser = Parser(self.lang)
+        scm_text = tslp.get_highlights_query(lang_id)
+        if not scm_text:
+            logging.warning(
+                f"couldn't get the treesitter highlights query for {lang_id}"
+            )
+            scm_text = ""
+        self.query = Query(self.lang, scm_text)
+        self.cursor = QueryCursor(self.query)
 
         self.keyword_format.setForeground(self.theme.keyword)
         self.keyword_format.setFontWeight(QFont.Weight.Bold)
-        keyword_patterns = [
-            rf"\b{k}\b" for k in chain(kwlist, softkwlist) if k not in self.builtin
-        ]
-
-        self.highlighting_rules = [
-            HighlightingRule(QRegularExpression(p), self.keyword_format)
-            for p in keyword_patterns
-        ]
-
-        self.builtin_format.setForeground(self.theme.builtin)
-        self.highlighting_rules.extend(
-            HighlightingRule(QRegularExpression(t), self.builtin_format)
-            for t in self.builtin
-        )
+        self.error_format.setForeground(self.theme.error)
 
         self.class_format.setFontWeight(QFont.Weight.Bold)
         self.class_format.setForeground(self.theme.klass)
-        self.highlighting_rules.append(
-            HighlightingRule(
-                QRegularExpression(r"\bclass\s+(\w+)\b"), self.class_format, 1
-            )
-        )
-
-        self.quotation_format.setForeground(self.theme.string)
-        self.highlighting_rules.append(
-            HighlightingRule(
-                QRegularExpression(r'"[^"]*"|\'[^\']*\''), self.quotation_format
-            )
-        )
-
-        self.function_foramt.setForeground(self.theme.function)
-        self.highlighting_rules.append(
-            HighlightingRule(
-                QRegularExpression(r"\bdef\s+(\w+)"), self.function_foramt, 1
-            )
-        )
 
         self.comment_format.setForeground(self.theme.comment)
-        self.highlighting_rules.append(
-            HighlightingRule(QRegularExpression("#[^\n]*"), self.comment_format)
-        )
 
-        self.triple_double = QRegularExpression('"""')
-        self.triple_single = QRegularExpression("'''")
-        self.multiline_string_format.setForeground(self.theme.string)
+        self.kind_format.setForeground(self.theme.kind)
+        self.string_format.setForeground(self.theme.string)
+        self.variable_format.setForeground(self.theme.variable)
+        self.function_foramt.setForeground(self.theme.function)
+        self.constant_format.setForeground(self.theme.constant)
+        self.base_format.setForeground(self.theme.base)
+
+        self.editor.contentsChange.connect(self.on_text_changed)
+
+        self.formats = {
+            "keyword": self.keyword_format,
+            "string": self.string_format,
+            "function": self.function_foramt,
+            "function.builtin": self.kind_format,
+            "comment": self.comment_format,
+            "error": self.error_format,
+            "constructor": self.class_format,
+            "type": self.class_format,
+            "constant": self.constant_format,
+            "operator": self.keyword_format,
+            "variable": self.variable_format,
+            "property": self.base_format,
+            "embedded": self.base_format,
+        }
+
+    def on_text_changed(
+        self, position: int, chars_removed: int, chars_added: int
+    ) -> None:
+        text = self.editor.toPlainText()
+        text_bytes = text.encode("utf-16-le")
+        if self.tree is not None:
+            start_byte = position * 2
+            old_end_byte = (start_byte + chars_removed) * 2
+            new_end_byte = (start_byte + chars_added) * 2
+
+            self.tree.edit(
+                start_byte=start_byte,
+                old_end_byte=old_end_byte,
+                new_end_byte=new_end_byte,
+                start_point=(0, 0),
+                old_end_point=(0, 0),
+                new_end_point=(0, 0),
+            )
+
+            self.tree = self.parser.parse(
+                text_bytes, old_tree=self.tree, encoding="utf16le"
+            )
+
+        else:
+            self.tree = self.parser.parse(text_bytes, encoding="utf16le")
+
+        self.rehighlightBlock(self.editor.findBlock(position))
 
     def highlightBlock(self, text: str) -> None:
-        for rule in self.highlighting_rules:
-            match_iter = rule.pattern.globalMatch(text)
-            while match_iter.hasNext():
-                _match = match_iter.next()
-                self.setFormat(
-                    _match.capturedStart(rule.group),
-                    _match.capturedLength(rule.group),
-                    rule.form,
-                )
+        if not self.tree:
+            return
 
-        self.setCurrentBlockState(0)
+        block_pos = self.currentBlock().position()
+        block_len = self.currentBlock().length()
 
-        if not self.match_multiline(text, self.triple_double, 1):
-            self.match_multiline(text, self.triple_single, 2)
+        block_start_byte = block_pos * 2
+        block_end_byte = (block_pos + block_len - 1) * 2
 
-    def match_multiline(self, text: str, delim: QRegularExpression, in_state: int):
-        if self.previousBlockState() == in_state:
-            start = 0
-            add = 0
-        else:
-            _match = delim.match(text)
-            start = _match.capturedStart()
-            add = _match.capturedLength()
+        self.cursor.set_byte_range(block_start_byte, block_end_byte)
+        captures = self.cursor.captures(self.tree.root_node)
 
-        while start >= 0:
-            _match = delim.match(text, start + add)
-            end = _match.capturedStart()
-            if end >= add:
-                length = end - start + add + _match.capturedLength()
-                self.setCurrentBlockState(0)
-            else:
-                self.setCurrentBlockState(in_state)
-                length = len(text) - start + add
+        for name, nodes in captures.items():
+            for node in nodes:
+                local_start = node.start_byte // 2 - block_pos
+                local_end = node.end_byte // 2 - block_pos
+                local_len = local_end - local_start
 
-            self.setFormat(start, length, self.multiline_string_format)
-            _match = delim.match(text, start + length)
-            start = _match.capturedStart()
+                node_text = node.text.decode(encoding="utf-16-le") if node.text else ""
 
-        return self.currentBlockState() == in_state
+                if local_len > 0:
+                    if name == "variable" and node_text == "self":
+                        self.setFormat(local_start, local_len, self.keyword_format)
+                    elif name in self.formats:
+                        self.setFormat(local_start, local_len, self.formats[name])
+                    else:
+                        self.setFormat(local_start, local_len, self.base_format)
