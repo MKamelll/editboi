@@ -1,4 +1,4 @@
-from PySide6.QtCore import QRect, QSize, Qt, QStringListModel
+from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import (
     QPaintEvent,
     QResizeEvent,
@@ -10,21 +10,12 @@ from PySide6.QtGui import (
     QKeyEvent,
     QTextCursor,
 )
-from PySide6.QtWidgets import (
-    QPlainTextEdit,
-    QWidget,
-    QTextEdit,
-    QCompleter,
-    QAbstractItemView,
-)
-
+from PySide6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
 from colorscheme import make_palette
-from keyword import kwlist, softkwlist
-import builtins
-from itertools import chain
-import re
 from python_highlighter import PythonHighlighter
 import tree_sitter_language_pack as tslp
+from completer import Completer
+import re
 
 # refrence: https://felgo.com/doc/qt5/qtwidgets-widgets-codeeditor-example/
 
@@ -68,28 +59,10 @@ class CodeEditor(QPlainTextEdit):
             if highlighter:
                 self.highlighter = highlighter(lang, scm, self.document())
 
+        self.completer = Completer(self)
+        self.completer.activated.connect(self.insert_completion)
         self.update_line_number_area_width(0)
         self.highlight_current_line()
-
-        self.words_list = list(
-            set(
-                k
-                for k in chain(
-                    kwlist,
-                    softkwlist,
-                    dir(builtins),
-                    dir(type),
-                    dir(object),
-                    ["self", "cls"],
-                )
-            )
-        )
-        self.completer = QCompleter(self.words_list)
-        self.completer.setWidget(self)
-        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.minimum_prefix_length = 2
-        self.document().contentsChanged.connect(self.update_completer)
 
     def load_file(self, path: str) -> None:
         with open(path, "r") as f:
@@ -131,50 +104,7 @@ class CodeEditor(QPlainTextEdit):
 
         super().keyPressEvent(event)
 
-        prefix = self.word_under_cursor()
-        if len(prefix) < self.minimum_prefix_length:
-            if popup := self.completer.popup():
-                popup.hide()
-            return
-
-        if prefix != self.completer.completionPrefix():
-            self.completer.setCompletionPrefix(prefix)
-            if popup := self.completer.popup():
-                popup.setCurrentIndex(self.completer.completionModel().index(0, 0))
-
-        rect = self.cursorRect()
-        if popup := self.completer.popup():
-            rect.setWidth(popup.sizeHintForColumn(0) + self.popup_best_size(popup))
-
-        self.completer.complete(rect)
-
-    def popup_best_size(self, popup: QAbstractItemView, extra_padding: int = 0) -> int:
-        padding = popup.width() - popup.viewport().width()
-        frame_width = 2 * popup.frameWidth()
-        longest_string = ""
-        model = self.completer.completionModel()
-        for row in range(model.rowCount()):
-            text = model.data(model.index(row, 0), Qt.ItemDataRole.DisplayRole)
-            if text and len(text) > len(longest_string):
-                longest_string = text
-
-        metrics = popup.fontMetrics()
-        text_width = metrics.horizontalAdvance(longest_string)
-        return padding + frame_width + text_width + extra_padding
-
-    def get_document_words(self) -> list[str]:
-        text = self.toPlainText()
-        words = re.findall(r"\b\w+\b", text)
-        current_word = self.word_under_cursor()
-        return list(k for k in set(words) if k != current_word)
-
-    def update_completer(self) -> None:
-        doc_words = self.get_document_words()
-        all_words = sorted(set(self.words_list + doc_words))
-        model = QStringListModel(all_words)
-        self.completer.setModel(model)
-
-    def insert_completion(self, completion: str):
+    def insert_completion(self, completion: str) -> None:
         cursor = self.textCursor()
         cursor.select(QTextCursor.SelectionType.WordUnderCursor)
         cursor.insertText(completion)
@@ -184,6 +114,12 @@ class CodeEditor(QPlainTextEdit):
         cursor = self.textCursor()
         cursor.select(QTextCursor.SelectionType.WordUnderCursor)
         return cursor.selectedText()
+
+    def get_document_words(self) -> list[str]:
+        text = self.toPlainText()
+        words = re.findall(r"\b\w+\b", text)
+        current_word = self.word_under_cursor()
+        return list(k for k in set(words) if k != current_word)
 
     def line_number_area_paint_event(self, event: QPaintEvent) -> None:
         painter = QPainter(self.line_number_area)
