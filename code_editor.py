@@ -54,8 +54,18 @@ class CodeEditor(QPlainTextEdit):
         if self.lang_id:
             lang = tslp.get_language(self.lang_id)
             scm = tslp.get_highlights_query(self.lang_id)
+            custom_scm = ""
+            try:
+                with open(f"custom/{self.lang_id}.scm", "r") as f:
+                    custom_scm = f.read()
+            except OSError as e:
+                print(f"no custom scm found for {self.lang_id}, using the default: {e}")
+            if scm:
+                scm += "\n" + custom_scm
+            else:
+                scm = custom_scm
             highlighter = highlighters.get(self.lang_id)
-            if scm and highlighter:
+            if highlighter:
                 self.highlighter = highlighter(lang, scm, self.document())
 
         self.update_line_number_area_width(0)
