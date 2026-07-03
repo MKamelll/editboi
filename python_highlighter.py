@@ -33,7 +33,6 @@ class PythonHighlighter(QSyntaxHighlighter):
         self.cursor = QueryCursor(self.query)
 
         self.keyword_format.setFontWeight(QFont.Weight.Bold)
-        self.class_format.setFontWeight(QFont.Weight.Bold)
 
         self.keyword_format.setForeground(QColor("#00bfff"))
         self.string_format.setForeground(QColor("#deb887"))
@@ -41,7 +40,9 @@ class PythonHighlighter(QSyntaxHighlighter):
         self.comment_format.setForeground(QColor("#808080"))
         self.error_format.setForeground(QColor("#ff0000"))
         self.class_format.setForeground(QColor("#98f5ff"))
+        self.decorator_format = self.class_format
         self.types_format.setForeground(QColor("#f08080"))
+        self.function_builtin_format = self.types_format
         self.constant_format.setForeground(QColor("#a2cd5a"))
         self.variable_format.setForeground(QColor("#4eee94"))
         self.base_format.setForeground(QColor("#cccccc"))
@@ -52,17 +53,17 @@ class PythonHighlighter(QSyntaxHighlighter):
             "keyword": self.keyword_format,
             "string": self.string_format,
             "function": self.function_foramt,
-            "function.builtin": self.types_format,
+            "function.method": self.function_foramt,
+            "function.decorator": self.decorator_format,
+            "function.builtin": self.function_builtin_format,
             "comment": self.comment_format,
             "error": self.error_format,
-            "constructor": self.class_format,
             "type": self.types_format,
-            "constant": self.constant_format,
+            "constant.builtin": self.constant_format,
             "operator.keyword": self.keyword_format,
             "variable.declaration": self.variable_format,
-            "property": self.base_format,
-            "embedded": self.base_format,
             "variable.builtin": self.keyword_format,
+            "class": self.class_format,
         }
 
     def on_text_changed(
@@ -70,6 +71,7 @@ class PythonHighlighter(QSyntaxHighlighter):
     ) -> None:
         text = self.editor.toPlainText()
         text_bytes = text.encode("utf-8")
+
         if self.tree is not None:
             start_byte = position
             old_end_byte = start_byte + chars_removed

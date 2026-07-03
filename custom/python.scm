@@ -13,3 +13,10 @@
  "is not"
  "not in"
 ] @operator.keyword
+
+(decorator) @function.decorator
+(decorator
+ (identifier) @function.decorator)
+
+(class_definition
+  name: (identifier) @class)
