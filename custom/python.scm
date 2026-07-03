@@ -19,4 +19,8 @@
  (identifier) @function.decorator)
 
 (class_definition
-  name: (identifier) @class)
+ name: (identifier) @class)
+
+(assignment
+  left: (attribute
+    attribute: (identifier) @property.declaration))

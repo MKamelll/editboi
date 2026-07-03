@@ -64,6 +64,7 @@ class PythonHighlighter(QSyntaxHighlighter):
             "variable.declaration": self.variable_format,
             "variable.builtin": self.keyword_format,
             "class": self.class_format,
+            "property.declaration": self.variable_format,
         }
 
     def on_text_changed(
