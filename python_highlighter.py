@@ -6,15 +6,24 @@ from PySide6.QtGui import (
     QFont,
 )
 from dataclasses import dataclass
-from tree_sitter import Language, Parser, Tree, Query, QueryCursor, Node
+from tree_sitter import Language, Tree, Query, QueryCursor, Node
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from python_code_editor import PythonCodeEditor
 
 # reference: https://felgo.com/doc/qt5/qtwidgets-richtext-syntaxhighlighter-example/
 # refrence: https://wiki.python.org/python/PyQt(2f)Python(20)syntax(20)highlighting.html
 
 
 class PythonHighlighter(QSyntaxHighlighter):
-    def __init__(self, lang: Language, scm: str, parent: QTextDocument) -> None:
-        super().__init__(parent)
+    def __init__(
+        self,
+        tree: Tree,
+        cursor: QueryCursor,
+        editor: "PythonCodeEditor",
+    ) -> None:
+        super().__init__(editor)
         self.keyword_format = QTextCharFormat()
         self.class_format = QTextCharFormat()
         self.comment_format = QTextCharFormat()
@@ -25,12 +34,10 @@ class PythonHighlighter(QSyntaxHighlighter):
         self.constant_format = QTextCharFormat()
         self.types_format = QTextCharFormat()
         self.base_format = QTextCharFormat()
-        self.tree: Tree | None = None
-        self.editor = parent
-
-        self.parser = Parser(language=lang)
-        self.query = Query(lang, scm)
-        self.cursor = QueryCursor(self.query)
+        self.tree = tree
+        self.editor = editor
+        self.cursor = cursor
+        self.setDocument(self.editor.document())
 
         self.keyword_format.setFontWeight(QFont.Weight.Bold)
 
@@ -47,7 +54,8 @@ class PythonHighlighter(QSyntaxHighlighter):
         self.variable_format.setForeground(QColor("#4eee94"))
         self.base_format.setForeground(QColor("#cccccc"))
 
-        self.editor.contentsChange.connect(self.on_text_changed)
+        self.editor.treeUpdated.connect(self.update_tree)
+        self.editor.needsRehighlight.connect(self.rehighlightBlock)
 
         self.formats = {
             "keyword": self.keyword_format,
@@ -67,34 +75,8 @@ class PythonHighlighter(QSyntaxHighlighter):
             "property.declaration": self.variable_format,
         }
 
-    def on_text_changed(
-        self, position: int, chars_removed: int, chars_added: int
-    ) -> None:
-        text = self.editor.toPlainText()
-        text_bytes = text.encode("utf-8")
-
-        if self.tree is not None:
-            start_byte = position
-            old_end_byte = start_byte + chars_removed
-            new_end_byte = start_byte + chars_added
-
-            self.tree.edit(
-                start_byte=start_byte,
-                old_end_byte=old_end_byte,
-                new_end_byte=new_end_byte,
-                start_point=(0, 0),
-                old_end_point=(0, 0),
-                new_end_point=(0, 0),
-            )
-
-            self.tree = self.parser.parse(
-                text_bytes, old_tree=self.tree, encoding="utf8"
-            )
-
-        else:
-            self.tree = self.parser.parse(text_bytes, encoding="utf8")
-
-        self.rehighlightBlock(self.editor.findBlock(position))
+    def update_tree(self, tree: Tree) -> None:
+        self.tree = tree
 
     def highlightBlock(self, text: str) -> None:
         if not self.tree:

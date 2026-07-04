@@ -1,4 +1,4 @@
-from PySide6.QtCore import QRect, QSize, Qt, QPointF
+from PySide6.QtCore import QRect, QSize, Qt, QPointF, Signal
 from PySide6.QtGui import (
     QPaintEvent,
     QResizeEvent,
@@ -9,6 +9,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QKeyEvent,
     QTextCursor,
+    QTextBlock,
 )
 from PySide6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
 from colorscheme import make_palette
@@ -16,14 +17,16 @@ from python_highlighter import PythonHighlighter
 import tree_sitter_language_pack as tslp
 from completer import Completer
 import re
+from tree_sitter import Language, Parser, Tree, Query, QueryCursor, Node
 
 # refrence: https://felgo.com/doc/qt5/qtwidgets-widgets-codeeditor-example/
 
-type Highlighter = PythonHighlighter
 
+class PythonCodeEditor(QPlainTextEdit):
+    treeUpdated = Signal(Tree)
+    needsRehighlight = Signal(QTextBlock)
 
-class CodeEditor(QPlainTextEdit):
-    def __init__(self, ext: str, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.line_number_area = LineNumberArea(self, self)
         self.blockCountChanged.connect(self.update_line_number_area_width)
@@ -40,33 +43,35 @@ class CodeEditor(QPlainTextEdit):
         self.setTabStopDistance(
             QFontMetrics(self.text_style).horizontalAdvance(" ") * 4
         )
-        self.highlighter: Highlighter | None = None
-        highlighters = {"python": PythonHighlighter}
+        self.lang_id = "python"
 
-        ext_map = {".py": "python"}
-        self.lang_id = ext_map.get(ext)
+        lang = tslp.get_language(self.lang_id)
+        self.parser = Parser(language=lang)
+        self.tree = self.build_initial_tree()
 
-        if self.lang_id:
-            lang = tslp.get_language(self.lang_id)
-            scm = tslp.get_highlights_query(self.lang_id)
-            custom_scm = ""
-            try:
-                with open(f"custom/{self.lang_id}.scm", "r") as f:
-                    custom_scm = f.read()
-            except OSError as e:
-                print(f"no custom scm found for {self.lang_id}, using the default: {e}")
-            if scm:
-                scm += "\n" + custom_scm
-            else:
-                scm = custom_scm
-            highlighter = highlighters.get(self.lang_id)
-            if highlighter:
-                self.highlighter = highlighter(lang, scm, self.document())
+        scm = self.load_scm()
+        query = Query(lang, scm)
+        cursor = QueryCursor(query)
+        self.highlighter = PythonHighlighter(self.tree, cursor, self)
+        self.document().contentsChange.connect(self.on_text_changed)
 
         self.completer = Completer(self)
         self.completer.activated.connect(self.insert_completion)
         self.update_line_number_area_width(0)
         self.highlight_current_line()
+
+    def load_scm(self) -> str:
+        scm = tslp.get_highlights_query(self.lang_id)
+        try:
+            with open(f"custom/{self.lang_id}.scm", "r") as f:
+                custom_scm = f.read()
+                if scm:
+                    scm += "\n" + custom_scm
+                else:
+                    scm = custom_scm
+                return scm
+        except OSError as e:
+            print(f"no custom scm found for {self.lang_id}, using the default: {e}")
 
     def load_file(self, path: str) -> None:
         with open(path, "r") as f:
@@ -78,6 +83,36 @@ class CodeEditor(QPlainTextEdit):
     def save_file(self, path: str) -> None:
         with open(path, "w") as f:
             f.write(self.toPlainText())
+
+    def build_initial_tree(self) -> Tree:
+        text = self.toPlainText()
+        text_bytes = text.encode(encoding="utf-8")
+        tree = self.parser.parse(text_bytes, encoding="utf8")
+        return tree
+
+    def on_text_changed(
+        self, position: int, chars_removed: int, chars_added: int
+    ) -> None:
+        text = self.document().toPlainText()
+        text_bytes = text.encode("utf-8")
+
+        start_byte = position
+        old_end_byte = start_byte + chars_removed
+        new_end_byte = start_byte + chars_added
+
+        self.tree.edit(
+            start_byte=start_byte,
+            old_end_byte=old_end_byte,
+            new_end_byte=new_end_byte,
+            start_point=(0, 0),
+            old_end_point=(0, 0),
+            new_end_point=(0, 0),
+        )
+
+        self.tree = self.parser.parse(text_bytes, old_tree=self.tree, encoding="utf8")
+        self.treeUpdated.emit(self.tree)
+
+        self.needsRehighlight.emit(self.document().findBlock(position))
 
     def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
@@ -234,12 +269,12 @@ class CodeEditor(QPlainTextEdit):
 
 
 class LineNumberArea(QWidget):
-    def __init__(self, editor: CodeEditor, parent: QWidget | None = None):
+    def __init__(self, editor: PythonCodeEditor, parent: QWidget | None = None):
         super().__init__(parent=parent)
-        self.code_editor = editor
+        self.python_code_editor = editor
 
     def sizeHint(self) -> QSize:
-        return QSize(self.code_editor.line_number_area_width(), 0)
+        return QSize(self.python_code_editor.line_number_area_width(), 0)
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        self.code_editor.line_number_area_paint_event(event)
+        self.python_code_editor.line_number_area_paint_event(event)

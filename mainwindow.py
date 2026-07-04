@@ -1,4 +1,4 @@
-from code_editor import CodeEditor
+from python_code_editor import PythonCodeEditor
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox
 
 
@@ -18,8 +18,8 @@ class MainWindow(QMainWindow):
         help_menu = self.menuBar().addMenu("Help")
         about_menu = self.menuBar().addMenu("About")
 
-        self.code_editor = CodeEditor(".py", self)
-        self.setCentralWidget(self.code_editor)
+        self.python_code_editor = PythonCodeEditor(self)
+        self.setCentralWidget(self.python_code_editor)
 
     def open_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -27,12 +27,12 @@ class MainWindow(QMainWindow):
         )
 
         if path:
-            self.code_editor.load_file(path)
+            self.python_code_editor.load_file(path)
             self.current_file = path
 
     def save_file(self) -> None:
         if self.current_file:
-            self.code_editor.save_file(self.current_file)
+            self.python_code_editor.save_file(self.current_file)
         else:
             self.save_as()
 
@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
             self, "Save File", "", "Python Files (*.py);;All Files (*)"
         )
         if path:
-            self.code_editor.save_file(path)
+            self.python_code_editor.save_file(path)
             self.current_file = path
 
     def quit(self) -> None:

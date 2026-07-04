@@ -9,11 +9,11 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from code_editor import CodeEditor
+    from python_code_editor import PythonCodeEditor
 
 
 class Completer(QCompleter):
-    def __init__(self, editor: "CodeEditor") -> None:
+    def __init__(self, editor: "PythonCodeEditor") -> None:
         super().__init__(parent=editor)
 
         self.editor = editor
