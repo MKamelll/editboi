@@ -1,4 +1,4 @@
-from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtCore import QRect, QSize, Qt, QPointF
 from PySide6.QtGui import (
     QPaintEvent,
     QResizeEvent,
@@ -30,7 +30,11 @@ class CodeEditor(QPlainTextEdit):
         self.updateRequest.connect(self.update_line_number_area)
         self.cursorPositionChanged.connect(self.highlight_current_line)
         self.setPalette(make_palette())
-        self.text_style = QFont("DejaVu Sans Mono", 16)
+        self.font_size = 16
+        self.font_name = "DejaVu Sans Mono"
+        self.tab_size = 4
+        self.insert_spaces_instead_of_tabs = True
+        self.text_style = QFont(self.font_name, self.font_size)
         self.text_style.setFixedPitch(True)
         self.setFont(self.text_style)
         self.setTabStopDistance(
@@ -75,6 +79,40 @@ class CodeEditor(QPlainTextEdit):
         with open(path, "w") as f:
             f.write(self.toPlainText())
 
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        if not self.insert_spaces_instead_of_tabs:
+            return
+        painter = QPainter(self.viewport())
+        self.draw_indent_dots(painter, event.rect())
+        painter.end()
+
+    def draw_indent_dots(self, painter: QPainter, rect: QRect) -> None:
+        metrics = self.fontMetrics()
+        char_width = metrics.horizontalAdvance(" ")
+        line_height = metrics.height()
+        color = self.palette().color(QPalette.ColorRole.PlaceholderText)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+
+        dot_radius = 1.5
+        block = self.firstVisibleBlock()
+        top = int(
+            self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+        )
+
+        while block.isValid() and top <= rect.bottom():
+            bottom = top + int(self.blockBoundingRect(block).height())
+            if block.isVisible() and bottom >= rect.top():
+                text = block.text()
+                leading_spaces = len(text) - len(text.lstrip(" "))
+                for col in range(leading_spaces):
+                    x = self.contentOffset().x() + col * char_width + char_width / 2
+                    y = top + line_height / 2
+                    painter.drawEllipse(QPointF(x, y), dot_radius, dot_radius)
+            top = bottom
+            block = block.next()
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if popup := self.completer.popup():
             if popup.isVisible():
@@ -101,6 +139,11 @@ class CodeEditor(QPlainTextEdit):
                 if event.key() == Qt.Key.Key_Escape:
                     popup.hide()
                     return
+
+        if event.key() == Qt.Key.Key_Tab and self.insert_spaces_instead_of_tabs:
+            cursor = self.textCursor()
+            cursor.insertText(" " * self.tab_size)
+            return
 
         super().keyPressEvent(event)
 
