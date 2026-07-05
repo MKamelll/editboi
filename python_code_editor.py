@@ -11,7 +11,7 @@ from PySide6.QtGui import (
     QTextCursor,
     QTextBlock,
 )
-from PySide6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
+from PySide6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit, QAbstractItemView
 from colorscheme import make_palette
 from python_highlighter import PythonHighlighter
 import tree_sitter_language_pack as tslp
@@ -148,14 +148,26 @@ class PythonCodeEditor(QPlainTextEdit):
             top = bottom
             block = block.next()
 
+    def get_popup_prev_row(self, popup: QAbstractItemView) -> int:
+        row = popup.currentIndex().row()
+        row_count = self.completer.completionModel().rowCount()
+        prev_row = (row - 1) % row_count if row_count > 0 else row
+        return prev_row
+
+    def get_popup_next_row(self, popup: QAbstractItemView) -> int:
+        row = popup.currentIndex().row()
+        row_count = self.completer.completionModel().rowCount()
+        next_row = (row + 1) % row_count if row_count > 0 else row
+        return next_row
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if popup := self.completer.popup():
             if popup.isVisible():
                 if event.key() == Qt.Key.Key_Up:
-                    row = popup.currentIndex().row()
-                    prev_row = (row - 1) % self.completer.completionModel().rowCount()
                     popup.setCurrentIndex(
-                        self.completer.completionModel().index(prev_row, 0)
+                        self.completer.completionModel().index(
+                            self.get_popup_prev_row(popup), 0
+                        )
                     )
                     return
                 if event.key() in [Qt.Key.Key_Enter, Qt.Key.Key_Return]:
@@ -165,10 +177,10 @@ class PythonCodeEditor(QPlainTextEdit):
                     popup.hide()
                     return
                 if event.key() in [Qt.Key.Key_Tab, Qt.Key.Key_Down]:
-                    row = popup.currentIndex().row()
-                    next_row = (row + 1) % self.completer.completionModel().rowCount()
                     popup.setCurrentIndex(
-                        self.completer.completionModel().index(next_row, 0)
+                        self.completer.completionModel().index(
+                            self.get_popup_next_row(popup), 0
+                        )
                     )
                     return
                 if event.key() == Qt.Key.Key_Escape:
