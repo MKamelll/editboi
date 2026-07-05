@@ -49,7 +49,7 @@ class PythonCodeEditor(QPlainTextEdit):
         self.parser = Parser(language=lang)
         self.tree = self.build_initial_tree()
 
-        scm = self.load_scm()
+        scm = self.load_highlights_scm()
         query = Query(lang, scm)
         cursor = QueryCursor(query)
         self.highlighter = PythonHighlighter(self.tree, cursor, self)
@@ -60,7 +60,7 @@ class PythonCodeEditor(QPlainTextEdit):
         self.update_line_number_area_width(0)
         self.highlight_current_line()
 
-    def load_scm(self) -> str:
+    def load_highlights_scm(self) -> str:
         scm = tslp.get_highlights_query(self.lang_id)
         try:
             with open(f"custom/{self.lang_id}.scm", "r") as f:
