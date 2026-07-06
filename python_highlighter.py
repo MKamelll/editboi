@@ -82,7 +82,9 @@ class PythonHighlighter(QSyntaxHighlighter):
         if not self.tree:
             return
 
-        block_pos = self.currentBlock().position()
+        block_pos = self.editor.cursor_pos_to_utf8_byte_offset(
+            self.currentBlock().position()
+        )
         block_len = self.currentBlock().length()
 
         self.cursor.set_byte_range(block_pos, block_pos + block_len - 1)

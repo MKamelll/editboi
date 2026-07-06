@@ -37,6 +37,7 @@ class PythonCodeEditor(QPlainTextEdit):
         self.font_name = "DejaVu Sans Mono"
         self.tab_size = 4
         self.insert_spaces_instead_of_tabs = True
+        self.indent_level = 0
         self.text_style = QFont(self.font_name, self.font_size)
         self.text_style.setFixedPitch(True)
         self.setFont(self.text_style)
@@ -49,11 +50,17 @@ class PythonCodeEditor(QPlainTextEdit):
         self.parser = Parser(language=lang)
         self.tree = self.build_initial_tree()
 
-        scm = self.load_highlights_scm()
-        query = Query(lang, scm)
-        cursor = QueryCursor(query)
-        self.highlighter = PythonHighlighter(self.tree, cursor, self)
+        self.highlight_scm = self.load_highlights_scm()
+        self.highlight_query = Query(lang, self.highlight_scm)
+        self.highlight_cursor = QueryCursor(self.highlight_query)
+        self.highlighter = PythonHighlighter(self.tree, self.highlight_cursor, self)
         self.document().contentsChange.connect(self.on_text_changed)
+
+        self.indent_scm = self.load_indents_scm()
+        self.indent_query = Query(lang, self.indent_scm) if self.indent_scm else None
+        self.indent_cursor = (
+            QueryCursor(self.indent_query) if self.indent_query else None
+        )
 
         self.completer = Completer(self)
         self.completer.activated.connect(self.insert_completion)
@@ -63,7 +70,20 @@ class PythonCodeEditor(QPlainTextEdit):
     def load_highlights_scm(self) -> str:
         scm = tslp.get_highlights_query(self.lang_id)
         try:
-            with open(f"custom/{self.lang_id}.scm", "r") as f:
+            with open(f"custom/{self.lang_id}/highlights.scm", "r") as f:
+                custom_scm = f.read()
+                if scm:
+                    scm += "\n" + custom_scm
+                else:
+                    scm = custom_scm
+                return scm
+        except OSError as e:
+            print(f"no custom scm found for {self.lang_id}, using the default: {e}")
+
+    def load_indents_scm(self) -> str:
+        scm = tslp.get_indents_query(self.lang_id)
+        try:
+            with open(f"custom/{self.lang_id}/indents.scm", "r") as f:
                 custom_scm = f.read()
                 if scm:
                     scm += "\n" + custom_scm
@@ -89,6 +109,119 @@ class PythonCodeEditor(QPlainTextEdit):
         text_bytes = text.encode(encoding="utf-8")
         tree = self.parser.parse(text_bytes, encoding="utf8")
         return tree
+
+    def maybe_dedent_line(self, row: int) -> None:
+        if not self.indent_cursor:
+            return
+        text = self.get_line_text(row).strip()
+        first_word = text.split()[0].rstrip(":") if text else ""
+
+        if first_word not in ["else", "elif", "except", "finally"]:
+            return
+
+        matches = self.indent_cursor.matches(self.tree.root_node)
+        for index, capture in matches:
+            for node in capture.get("indent.error_branch", []):
+                if node.start_point[0] != row:
+                    continue
+                node_text = node.text.decode("utf-8") if node.text else ""
+                if node_text != first_word:
+                    continue
+                error_node = node.parent
+                parent = error_node.parent if error_node else None
+                valid_parents = {
+                    "else": (
+                        "if_statement",
+                        "for_statement",
+                        "while_statement",
+                        "try_statement",
+                    ),
+                    "elif": ("if_statement",),
+                    "except": ("try_statement",),
+                    "finally": ("try_statement",),
+                }[first_word]
+                while parent is not None:
+                    if parent.type in valid_parents:
+                        target_indent = self.get_line_indent(parent.start_point[0])
+                        self.set_line_indent(row, target_indent)
+                        return
+                    parent = parent.parent
+
+    def cursor_pos_to_utf8_byte_offset(self, cursor_pos: int) -> int:
+        text = self.toPlainText()
+        prefix = text[:cursor_pos]
+        return len(prefix.encode("utf-8"))
+
+    def set_line_indent(self, row: int, target_indent: int) -> None:
+        block = self.document().findBlockByNumber(row)
+        if not block.isValid():
+            return
+        text = block.text().lstrip(" ")
+        cursor = QTextCursor(block)
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+        cursor.insertText(" " * target_indent + text)
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+
+    def maybe_indent_line(self, row: int) -> None:
+        if not self.indent_cursor:
+            return
+        prev_row = max(0, row - 1)
+        matches = self.indent_cursor.matches(self.tree.root_node)
+        begins: set[int] = set()
+        branches: set[int] = set()
+        dedents: set[int] = set()
+        aligns: list[tuple[int, int, int]] = []
+
+        for index, capture in matches:
+            for name, nodes in capture.items():
+                for node in nodes:
+                    if name == "indent.begin":
+                        begins.add(node.start_point[0])
+                    elif name == "indent.branch":
+                        branches.add(node.start_point[0])
+                    elif name == "indent.dedent_next":
+                        dedents.add(node.start_point[0])
+                    elif name == "indent.align":
+                        aligns.append(
+                            (
+                                node.start_point[0],
+                                node.start_point[1],
+                                node.end_point[0],
+                            )
+                        )
+
+        for open_row, open_col, close_row in aligns:
+            if open_row <= prev_row < close_row:
+                self.set_line_indent(row, open_col + 1)
+                return
+
+        base_indent = self.get_line_indent(prev_row)
+
+        if prev_row in begins or prev_row in branches:
+            self.set_line_indent(row, base_indent + self.tab_size)
+            return
+        if prev_row in dedents:
+            self.set_line_indent(row, max(0, base_indent - self.tab_size))
+            return
+
+        self.set_line_indent(row, base_indent)
+
+    def get_line_text(self, row: int) -> str:
+        cursor = self.textCursor()
+        block = cursor.block()
+        if not block.isValid():
+            return ""
+
+        return block.text()
+
+    def get_line_indent(self, row: int) -> int:
+        block = self.document().findBlockByNumber(row)
+        if not block.isValid():
+            return 0
+        text = block.text()
+        return len(text) - len(text.lstrip(" "))
 
     def on_text_changed(
         self, position: int, chars_removed: int, chars_added: int
@@ -190,6 +323,17 @@ class PythonCodeEditor(QPlainTextEdit):
         if event.key() == Qt.Key.Key_Tab and self.insert_spaces_instead_of_tabs:
             cursor = self.textCursor()
             cursor.insertText(" " * self.tab_size)
+            self.setTextCursor(cursor)
+            return
+
+        if event.key() in [Qt.Key.Key_Enter, Qt.Key.Key_Return]:
+            cursor = self.textCursor()
+            self.maybe_dedent_line(cursor.blockNumber())
+            super().keyPressEvent(event)
+            new_row = self.textCursor().blockNumber()
+            new_row_text = self.document().findBlockByNumber(new_row).text()
+            if new_row_text.strip() == "":
+                self.maybe_indent_line(new_row)
             return
 
         super().keyPressEvent(event)
