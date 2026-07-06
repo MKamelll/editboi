@@ -156,11 +156,17 @@ class PythonCodeEditor(QPlainTextEdit):
         block = self.document().findBlockByNumber(row)
         if not block.isValid():
             return
-        text = block.text().lstrip(" ")
+        text = block.text()
+        stripped = text.lstrip(" ")
+        current_indent = len(text) - len(stripped)
+
+        if current_indent == target_indent:
+            return
+
         cursor = QTextCursor(block)
         cursor.beginEditBlock()
         cursor.select(QTextCursor.SelectionType.LineUnderCursor)
-        cursor.insertText(" " * target_indent + text)
+        cursor.insertText(" " * target_indent + stripped)
         cursor.endEditBlock()
         self.setTextCursor(cursor)
 
@@ -330,10 +336,7 @@ class PythonCodeEditor(QPlainTextEdit):
             cursor = self.textCursor()
             self.maybe_dedent_line(cursor.blockNumber())
             super().keyPressEvent(event)
-            new_row = self.textCursor().blockNumber()
-            new_row_text = self.document().findBlockByNumber(new_row).text()
-            if new_row_text.strip() == "":
-                self.maybe_indent_line(new_row)
+            self.maybe_indent_line(cursor.blockNumber())
             return
 
         super().keyPressEvent(event)
